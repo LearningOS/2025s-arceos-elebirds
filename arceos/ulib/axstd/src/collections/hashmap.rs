@@ -1,14 +1,21 @@
+#[cfg(feature = "alloc")]
 extern crate alloc;
 
+#[cfg(feature = "alloc")]
 use alloc::vec;
+#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
+#[cfg(feature = "alloc")]
 use core::hash::{Hash, Hasher};
 
+#[cfg(feature = "alloc")]
 const FIBONACCI_MAGIC: u64 = 1_140_071_481_932_319_848;
 
+#[cfg(feature = "alloc")]
 #[derive(Clone, Copy, Default, Hash)]
 pub struct FibonacciHash(u64);
 
+#[cfg(feature = "alloc")]
 impl Hasher for FibonacciHash {
     fn finish(&self) -> u64 {
         self.0
@@ -21,6 +28,7 @@ impl Hasher for FibonacciHash {
     }
 }
 
+#[cfg(feature = "alloc")]
 #[derive(Hash)]
 pub struct HashMap<K, V>
 where
@@ -34,6 +42,7 @@ where
     hasher: FibonacciHash,
 }
 
+#[cfg(feature = "alloc")]
 impl<K, V> HashMap<K, V> 
 where
     K: Eq + Hash + Clone,
@@ -112,12 +121,14 @@ where
     }
 }
 
+#[cfg(feature = "alloc")]
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct HashMapEntry<K, V> {
     key: K,
     value: V,
 }
 
+#[cfg(feature = "alloc")]
 impl<K, V> HashMapEntry<K, V> {
     fn new(key: K, value: V) -> Self {
         Self { key, value }
