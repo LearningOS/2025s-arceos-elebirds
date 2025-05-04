@@ -67,6 +67,15 @@ impl DirNode {
         children.remove(name);
         Ok(())
     }
+
+    /// Rename a node in this directory.
+    pub fn rename_node(&self, src: &str, dst: &str) -> VfsResult {
+        // 很明显，这个rename函数仅仅支持同目录下的重命名
+        log::debug!("rename at ramfs: {} to {}", src, dst);
+        let node = self.children.write().remove(src).ok_or(VfsError::NotFound)?;
+        self.children.write().insert(dst.into(), node);
+        Ok(())
+    }
 }
 
 impl VfsNodeOps for DirNode {
@@ -165,6 +174,31 @@ impl VfsNodeOps for DirNode {
         }
     }
 
+    fn rename(&self, src: &str, dst: &str) -> VfsResult {
+        // 很明显，这个rename函数仅仅支持同目录下的重命名
+        log::debug!("rename at ramfs: {} to {}", src, dst);
+        let (name, rest) = split_path(src);
+        if let Some(rest) = rest {
+            match name {
+                "" | "." => self.rename(rest, dst),
+                ".." => self.parent().ok_or(VfsError::NotFound)?.rename(rest, dst),
+                _ => {
+                    let subdir = self
+                        .children
+                        .read()
+                        .get(name)
+                        .ok_or(VfsError::NotFound)?
+                        .clone();
+                    subdir.rename(rest, dst)
+                }
+            }
+        } else if name.is_empty() || name == "." || name == ".." {
+            Err(VfsError::InvalidInput) // remove '.' or '..
+        } else {
+            self.rename_node(name, split_path_last(dst).0)
+        }
+    }
+
     axfs_vfs::impl_vfs_dir_default! {}
 }
 
@@ -172,5 +206,12 @@ fn split_path(path: &str) -> (&str, Option<&str>) {
     let trimmed_path = path.trim_start_matches('/');
     trimmed_path.find('/').map_or((trimmed_path, None), |n| {
         (&trimmed_path[..n], Some(&trimmed_path[n + 1..]))
+    })
+}
+
+fn split_path_last(path: &str) -> (&str, Option<&str>) {
+    let trimmed_path = path.trim_start_matches('/');
+    trimmed_path.rfind('/').map_or((trimmed_path, None), |n| {
+        (&trimmed_path[n + 1..], Some(&trimmed_path[..n]))
     })
 }
