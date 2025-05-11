@@ -7,7 +7,9 @@ use axerrno::LinuxError;
 use axtask::current;
 use axtask::TaskExtRef;
 use axhal::paging::MappingFlags;
-use arceos_posix_api as api;
+use arceos_posix_api::{self as api, get_file_like};
+use memory_addr::{MemoryAddr, VirtAddr, VirtAddrRange};
+use axstd::vec;
 
 const SYS_IOCTL: usize = 29;
 const SYS_OPENAT: usize = 56;
@@ -131,16 +133,70 @@ fn handle_syscall(tf: &TrapFrame, syscall_num: usize) -> isize {
     ret
 }
 
+/// mmap: 将文件或设备映射到进程的地址空间
+/// 
+/// 参数:
+/// - addr: 映射的地址
+/// - length: 映射的长度
+/// - prot: 保护属性
+/// - flags: 映射标志
+/// - fd: 文件描述符
 #[allow(unused_variables)]
 fn sys_mmap(
     addr: *mut usize,
     length: usize,
     prot: i32,
-    flags: i32,
+    _flags: i32,
     fd: i32,
     _offset: isize,
 ) -> isize {
-    unimplemented!("no sys_mmap!");
+    let curr = current();
+    let mut uspace = curr.task_ext().aspace.lock();
+    
+    // 在当前进程的虚拟地址空间中，寻找一段空闲的满足要求的连续的虚拟地址
+    // 如果 addr 为 NULL，则内核选择（页面对齐）创建映射的地址;这是最便携的创建新映射的方法。
+    // 如果 addr 不是 NULL，则 kernel 将其视为放置 Map 位置的提示;
+    // 在Linux，内核会选择附近的页面边界（但总是 大于或等于 /proc/sys/vm/mmap_min_addr）并尝试创建映射。
+    // 如果那里已经存在另一个映射，则内核会选择 一个可能取决于也可能不取决于 hint 的新地址。
+    let start = VirtAddr::from_usize(addr as usize + 0x10_0000).align_down_4k();
+    let size = length.align_up_4k();
+    let Some(vaddr) = uspace.find_free_area(start, size, 
+        VirtAddrRange::from_start_size(uspace.base(), uspace.size())
+    ) else {
+        ax_println!("mmap: no free area");
+        return -LinuxError::ENOMEM.code() as _;
+    };
+
+    ax_println!("expected addr: 0x{:x}, size: {}", addr as usize, length);
+    ax_println!("got addr: 0x{:x}, size: {}", vaddr.as_usize(), size);
+
+    // 分配内存空间
+    let prot = MmapProt::from_bits_truncate(prot);
+    if let Err(e) = uspace.map_alloc(vaddr, size, prot.into(), true) {
+        ax_println!("mmap: map memory failed: {}", e);
+        return -LinuxError::ENOMEM.code() as _;
+    };
+
+    // 读取文件内容到缓冲区
+    let mut buf = vec![0; length];
+    let Ok(file) = get_file_like(fd) else {
+        ax_println!("mmap: invalid file descriptor");
+        return -LinuxError::EBADF.code() as _;
+    };
+    if let Err(e) = file.read(&mut buf) {
+        ax_println!("mmap: read file failed: {}", e);
+        return -LinuxError::EIO.code() as _;
+    };
+
+    // 将缓冲区内容写入到内存区域
+    if let Err(e) = uspace.write(vaddr, &buf) {
+        ax_println!("mmap: write memory failed: {}", e);
+        return -LinuxError::EIO.code() as _;
+    };
+
+    ax_println!("mmap: write memory success");
+
+    vaddr.as_usize() as isize
 }
 
 fn sys_openat(dfd: c_int, fname: *const c_char, flags: c_int, mode: api::ctypes::mode_t) -> isize {
